@@ -1,5 +1,6 @@
 import type { DemoView } from '../../../shared/types.js';
 import type { SimulationEngine } from './engine.js';
+import { ALGORITHM_LABEL } from './routing.js';
 
 /**
  * One-click demonstration, written as a list of steps. Each step has an
@@ -123,7 +124,7 @@ export class DemoRunner {
     const m = e.getMetrics();
     const r = m.lastRecovery;
     this.summary = r
-      ? `Recovered from ${r.cause} failure in ${r.recoveryMs} ms (detection ${r.detectionMs} ms, BFS ${r.bfsMicros} µs). ` +
+      ? `Recovered from ${r.cause} failure in ${r.recoveryMs} ms (detection ${r.detectionMs} ms, ${ALGORITHM_LABEL[r.algorithm]} ${r.computeMicros} µs). ` +
         `Delivered ${m.delivered}/${m.sent} packets — loss ${m.lossPercent?.toFixed(1) ?? '0.0'}% (packets lost during the detection window).`
       : 'Demo finished, but no recovery was recorded.';
     e.endDemo(`Demo complete — ${this.summary}`, true);

@@ -87,6 +87,7 @@ export type EventKind =
   | 'LINK_DOWN'
   | 'LINK_UP'
   | 'BFS'
+  | 'DIJKSTRA'
   | 'ROUTE_CHANGED'
   | 'RECOVERY'
   | 'NO_ROUTE'
@@ -111,7 +112,11 @@ export interface RecoveryRecord {
   recoveryMs: number;
   /** Failure occurrence → failure declared by heartbeats (simulated ms). */
   detectionMs: number;
-  /** Real wall-clock time spent inside the BFS function (microseconds). */
+  /** Routing algorithm that computed the new route. */
+  algorithm: RoutingAlgorithm;
+  /** Real wall-clock time spent inside the routing function (microseconds). */
+  computeMicros: number;
+  /** @deprecated Same value as `computeMicros` (kept for older clients). */
   bfsMicros: number;
   oldRoute: NodeId[] | null;
   newRoute: NodeId[];
@@ -151,7 +156,56 @@ export interface BfsTrace {
   excludedLinks: LinkId[];
 }
 
+export type RoutingAlgorithm = 'BFS' | 'DIJKSTRA';
+
+/** One settle step of Dijkstra's algorithm. */
+export interface DijkstraStep {
+  node: NodeId;
+  cost: number;
+  hops: number;
+  via: NodeId | null;
+}
+
+/** Final row of Dijkstra's table for one node (null cost = unreachable / ∞). */
+export interface DijkstraTableRow {
+  node: NodeId;
+  cost: number | null;
+  hops: number | null;
+  via: NodeId | null;
+  settled: boolean;
+}
+
+/** Algorithm-neutral record of one route computation, used to explain the choice. */
+export interface RouteTrace {
+  algorithm: RoutingAlgorithm;
+  /** Simulated time of the computation. */
+  at: number;
+  source: NodeId;
+  destination: NodeId;
+  path: NodeId[] | null;
+  hops: number | null;
+  /** Sum of link latencies along `path` (ms), whichever algorithm chose it. */
+  cost: number | null;
+  /** BFS: dequeue order. Dijkstra: settle order. */
+  visitOrder: NodeId[];
+  excludedNodes: NodeId[];
+  excludedLinks: LinkId[];
+  /** BFS only: hop level of every discovered node. */
+  bfsLevels?: Record<NodeId, number>;
+  /** Dijkstra only: settle steps and final table. */
+  dijkstraSteps?: DijkstraStep[];
+  dijkstraTable?: DijkstraTableRow[];
+  /** Ties resolved by the deterministic tie-breaking rule. */
+  tieBreaks: string[];
+  /** Plain-language explanation generated from the actual result. */
+  explanation: string;
+  /** Real wall-clock time spent in the algorithm (microseconds). */
+  computeMicros: number;
+}
+
 export interface SimConfig {
+  /** Routing algorithm used for route discovery. Default: BFS. */
+  routingAlgorithm: RoutingAlgorithm;
   heartbeatIntervalMs: number;
   missedThreshold: number;
   /** Auto traffic: 0 disables, otherwise one DATA packet every N ms while running. */
@@ -188,7 +242,15 @@ export interface SimSnapshot {
   series: MetricSample[];
   /** End-to-end delay of recently delivered packets, for the delay chart. */
   delaySamples: { seq: number; delayMs: number; route: string }[];
+  /** Last route computation, kept for older clients (filled whichever algorithm ran). */
   lastBfs: BfsTrace | null;
+  routing: {
+    algorithm: RoutingAlgorithm;
+    /** Latest route computation with its full explanation trace. */
+    lastResult: RouteTrace | null;
+    /** Total latency of the active route (ms), null when there is no route. */
+    activeRouteCost: number | null;
+  };
   config: SimConfig;
   demo: DemoView;
 }

@@ -6,6 +6,10 @@ export interface BfsResult {
   path: NodeId[] | null;
   /** Order in which nodes were dequeued — useful for explaining the algorithm. */
   visitOrder: NodeId[];
+  /** Hop distance from the source for every node that was discovered. */
+  levels: Record<NodeId, number>;
+  /** BFS-tree parent of every discovered node (source → null). */
+  parents: Record<NodeId, NodeId | null>;
 }
 
 /**
@@ -17,14 +21,24 @@ export interface BfsResult {
  * 4. When the destination is reached, follow parent pointers back to the source.
  *
  * Because BFS explores the graph level by level, the first time it reaches the
- * destination is guaranteed to be via a path with the fewest hops.
+ * destination is guaranteed to be via a path with the fewest hops. Link
+ * latency (edge weight) is ignored. Ties between equal-hop paths are broken by
+ * the graph's sorted neighbour order, i.e. alphabetically.
  */
 export function bfs(graph: Graph, source: NodeId, destination: NodeId): BfsResult {
   const visitOrder: NodeId[] = [];
-  if (!graph.has(source) || !graph.has(destination)) return { path: null, visitOrder };
+  const levels: Record<NodeId, number> = {};
+  const parents: Record<NodeId, NodeId | null> = {};
+  if (!graph.has(source) || !graph.has(destination)) return { path: null, visitOrder, levels, parents };
 
   const parent = new Map<NodeId, NodeId | null>([[source, null]]);
+  levels[source] = 0;
   const queue: NodeId[] = [source];
+
+  const result = (path: NodeId[] | null): BfsResult => {
+    for (const [n, p] of parent) parents[n] = p;
+    return { path, visitOrder, levels, parents };
+  };
 
   while (queue.length > 0) {
     const current = queue.shift()!;
@@ -33,15 +47,16 @@ export function bfs(graph: Graph, source: NodeId, destination: NodeId): BfsResul
     if (current === destination) {
       const path: NodeId[] = [];
       for (let n: NodeId | null = current; n !== null; n = parent.get(n)!) path.unshift(n);
-      return { path, visitOrder };
+      return result(path);
     }
 
-    for (const next of graph.get(current) ?? []) {
+    for (const { to: next } of graph.get(current) ?? []) {
       if (!parent.has(next)) {
         parent.set(next, current);
+        levels[next] = levels[current] + 1;
         queue.push(next);
       }
     }
   }
-  return { path: null, visitOrder };
+  return result(null);
 }

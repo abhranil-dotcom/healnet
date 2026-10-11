@@ -1,4 +1,3 @@
-import { performance } from 'node:perf_hooks';
 import type {
   BfsTrace,
   Command,
@@ -16,19 +15,21 @@ import type {
   PacketRecord,
   PacketType,
   RecoveryRecord,
+  RouteTrace,
   SimConfig,
   SimEvent,
   SimSnapshot,
   SystemStatus,
 } from '../../../shared/types.js';
-import { bfs } from './bfs.js';
 import { formatCrc } from './crc16.js';
 import { DemoRunner } from './demo.js';
 import { corruptPacket, createPacket, validatePacket } from './packet.js';
+import { ALGORITHM_LABEL, computeRoute, isRoutingAlgorithm } from './routing.js';
 import { Scheduler } from './scheduler.js';
-import { buildGraph, defaultTopology, linkId, type LinkDef, type TopologyDef } from './topology.js';
+import { buildGraph, defaultTopology, linkId, pathCost, type LinkDef, type TopologyDef } from './topology.js';
 
 export const DEFAULT_CONFIG: SimConfig = {
+  routingAlgorithm: 'BFS',
   heartbeatIntervalMs: 1000,
   missedThreshold: 3,
   trafficIntervalMs: 1000,
@@ -111,6 +112,7 @@ export class SimulationEngine {
   events: SimEvent[] = [];
   series: MetricSample[] = [];
   lastBfs: BfsTrace | null = null;
+  lastRoute: RouteTrace | null = null;
   recoveries: RecoveryRecord[] = [];
 
   private scheduler = new Scheduler();
@@ -146,6 +148,7 @@ export class SimulationEngine {
     this.deliveries = [];
     this.recoveries = [];
     this.lastBfs = null;
+    this.lastRoute = null;
     this.counters = { sent: 0, delivered: 0, lost: 0, crcRejected: 0, totalDelay: 0 };
     this.nextPacketId = 1;
     this.nextSeq = 1;
@@ -280,30 +283,41 @@ export class SimulationEngine {
 
   // ───────────────────────────── routing ─────────────────────────────
 
-  /** Rebuild the usable graph from *detected* state and run BFS. */
+  /** Rebuild the usable graph from *detected* state and run the configured routing algorithm. */
   private recomputeRoute(reason: string): void {
     const excludedNodes = new Set([...this.nodes.values()].filter((n) => n.status === 'FAILED').map((n) => n.id));
     const excludedLinks = new Set([...this.links.values()].filter((l) => l.status === 'DOWN').map((l) => l.def.id));
     const graph = buildGraph(this.topo, excludedNodes, excludedLinks);
 
-    const t0 = performance.now();
-    const result = bfs(graph, this.flow.source, this.flow.destination);
-    const bfsMicros = Math.round((performance.now() - t0) * 1000 * 10) / 10;
-
-    this.lastBfs = {
+    const algorithm = this.config.routingAlgorithm;
+    const result = computeRoute(algorithm, graph, this.flow.source, this.flow.destination);
+    const trace: RouteTrace = {
+      ...result,
       at: this.now,
-      visitOrder: result.visitOrder,
-      path: result.path,
       excludedNodes: [...excludedNodes],
       excludedLinks: [...excludedLinks],
     };
+    this.lastRoute = trace;
+    // Legacy field for older clients: describes the latest route computation.
+    this.lastBfs = { at: trace.at, visitOrder: trace.visitOrder, path: trace.path, excludedNodes: trace.excludedNodes, excludedLinks: trace.excludedLinks };
+
     const excluded = [...excludedNodes, ...excludedLinks];
-    this.log(
-      'BFS',
-      'info',
-      `BFS executed (${reason}): excluded [${excluded.join(', ') || 'none'}], visit order ${result.visitOrder.join(', ') || '—'} → ` +
-        (result.path ? `path ${fmtRoute(result.path)}` : 'no path'),
-    );
+    if (algorithm === 'BFS') {
+      this.log(
+        'BFS',
+        'info',
+        `BFS executed (${reason}): excluded [${excluded.join(', ') || 'none'}], visit order ${result.visitOrder.join(', ') || '—'} → ` +
+          (result.path ? `path ${fmtRoute(result.path)}` : 'no path'),
+      );
+    } else {
+      const settled = (result.dijkstraSteps ?? []).map((st) => `${st.node}(${st.cost})`).join(', ') || '—';
+      this.log(
+        'DIJKSTRA',
+        'info',
+        `Dijkstra executed (${reason}): excluded [${excluded.join(', ') || 'none'}], settled ${settled} → ` +
+          (result.path ? `path ${fmtRoute(result.path)}, cost ${result.cost} ms` : 'no path'),
+      );
+    }
 
     const oldRoute = this.activeRoute;
     if (sameRoute(oldRoute, result.path)) return;
@@ -328,7 +342,9 @@ export class SimulationEngine {
         recoveredAt: this.now,
         recoveryMs: this.now - d.failedAt,
         detectionMs: (d.detectedAt ?? this.now) - d.failedAt,
-        bfsMicros,
+        algorithm,
+        computeMicros: result.computeMicros,
+        bfsMicros: result.computeMicros,
         oldRoute: d.oldRoute,
         newRoute: result.path,
       };
@@ -337,7 +353,7 @@ export class SimulationEngine {
       this.log(
         'RECOVERY',
         'success',
-        `Recovery completed: ${rec.cause} failure → ${fmtRoute(rec.newRoute)} in ${rec.recoveryMs} ms (detection ${rec.detectionMs} ms, BFS ${rec.bfsMicros} µs)`,
+        `Recovery completed: ${rec.cause} failure → ${fmtRoute(rec.newRoute)} in ${rec.recoveryMs} ms (detection ${rec.detectionMs} ms, ${ALGORITHM_LABEL[algorithm]} ${rec.computeMicros} µs)`,
       );
     }
   }
@@ -573,6 +589,7 @@ export class SimulationEngine {
 
   setConfig(cfg: Partial<SimConfig>): CommandResult {
     const next = { ...this.config, ...cfg };
+    if (!isRoutingAlgorithm(next.routingAlgorithm)) return { ok: false, error: 'Routing algorithm must be BFS or DIJKSTRA' };
     if (!Number.isFinite(next.heartbeatIntervalMs) || next.heartbeatIntervalMs < 200 || next.heartbeatIntervalMs > 5000)
       return { ok: false, error: 'Heartbeat interval must be between 200 and 5000 ms' };
     if (!Number.isInteger(next.missedThreshold) || next.missedThreshold < 1 || next.missedThreshold > 10)
@@ -580,17 +597,26 @@ export class SimulationEngine {
     if (!Number.isFinite(next.trafficIntervalMs) || (next.trafficIntervalMs !== 0 && (next.trafficIntervalMs < 200 || next.trafficIntervalMs > 10000)))
       return { ok: false, error: 'Traffic interval must be 0 (off) or between 200 and 10000 ms' };
     if (this.demo?.running) return { ok: false, error: 'Stop the demo before changing configuration' };
+    const algorithmChanged = next.routingAlgorithm !== this.config.routingAlgorithm;
     this.config = next;
     this.log('USER', 'info', `Configuration: heartbeat ${next.heartbeatIntervalMs} ms, threshold ${next.missedThreshold}, traffic ${next.trafficIntervalMs ? next.trafficIntervalMs + ' ms' : 'off'}`);
+    if (algorithmChanged) {
+      this.log('USER', 'info', `Routing algorithm set to ${ALGORITHM_LABEL[next.routingAlgorithm]}`);
+      this.recomputeRoute('routing algorithm changed');
+    }
     return { ok: true };
   }
 
   runDemo(): void {
     const userConfig = this.demoConfigBackup ?? this.config;
+    // The Classic demo always uses BFS. Set it before reset() so the initial route is BFS too;
+    // traffic timing is switched after reset() exactly as before, keeping results identical.
+    this.demoConfigBackup = null;
+    this.config = { ...userConfig, routingAlgorithm: 'BFS' };
     this.reset();
     this.demoConfigBackup = userConfig;
     // Demo traffic: one DATA packet every 500 ms so the loss window is visible.
-    this.config = { ...userConfig, trafficIntervalMs: 500 };
+    this.config = { ...userConfig, trafficIntervalMs: 500, routingAlgorithm: 'BFS' };
     this.demo = new DemoRunner();
     this.log('DEMO', 'info', 'Demo started');
     this.start();
@@ -599,9 +625,11 @@ export class SimulationEngine {
 
   /** Called by the demo (finish) and by the user (stop). */
   endDemo(message: string, pause: boolean): void {
+    const demoAlgorithm = this.config.routingAlgorithm;
     if (this.demoConfigBackup) this.config = this.demoConfigBackup;
     this.demoConfigBackup = null;
     this.log('DEMO', 'info', message);
+    if (this.config.routingAlgorithm !== demoAlgorithm) this.recomputeRoute('routing algorithm restored after demo');
     if (pause) this.pause();
   }
 
@@ -662,6 +690,11 @@ export class SimulationEngine {
       series: [...this.series],
       delaySamples: this.deliveries.slice(-60).map((d) => ({ seq: d.seq, delayMs: d.delay, route: d.route })),
       lastBfs: this.lastBfs,
+      routing: {
+        algorithm: this.config.routingAlgorithm,
+        lastResult: this.lastRoute,
+        activeRouteCost: this.activeRoute ? pathCost(buildGraph(this.topo), this.activeRoute) : null,
+      },
       config: { ...this.config },
       demo: this.demo?.view() ?? { running: false, finished: false, steps: [], summary: null },
     };

@@ -7,7 +7,7 @@ const FILTERS: { key: string; label: string; kinds: EventKind[] | null }[] = [
   { key: 'all', label: 'All', kinds: null },
   { key: 'packets', label: 'Packets', kinds: ['PACKET_SENT', 'PACKET_DELIVERED', 'PACKET_LOST', 'CRC_FAILED'] },
   { key: 'faults', label: 'Faults', kinds: ['HEARTBEAT_MISSED', 'NODE_FAILED', 'NODE_RESTORED', 'LINK_DOWN', 'LINK_UP', 'CRC_FAILED', 'USER'] },
-  { key: 'routing', label: 'Routing', kinds: ['INIT', 'BFS', 'ROUTE_CHANGED', 'RECOVERY', 'NO_ROUTE', 'DEMO'] },
+  { key: 'routing', label: 'Routing', kinds: ['INIT', 'BFS', 'DIJKSTRA', 'ROUTE_CHANGED', 'RECOVERY', 'NO_ROUTE', 'DEMO'] },
 ];
 
 const levelCls = {
@@ -20,7 +20,7 @@ const levelCls = {
 const kindLabel: Record<EventKind, string> = {
   INIT: 'INIT', PACKET_SENT: 'SEND', PACKET_DELIVERED: 'RECV', PACKET_LOST: 'LOSS', CRC_FAILED: 'CRC',
   HEARTBEAT_MISSED: 'HB', NODE_FAILED: 'FAIL', NODE_RESTORED: 'UP', LINK_DOWN: 'LINK', LINK_UP: 'LINK',
-  BFS: 'BFS', ROUTE_CHANGED: 'ROUTE', RECOVERY: 'HEAL', NO_ROUTE: 'ROUTE', USER: 'USER', DEMO: 'DEMO',
+  BFS: 'BFS', DIJKSTRA: 'DIJK', ROUTE_CHANGED: 'ROUTE', RECOVERY: 'HEAL', NO_ROUTE: 'ROUTE', USER: 'USER', DEMO: 'DEMO',
 };
 
 export function EventFeed({ events }: { events: SimEvent[] }) {
