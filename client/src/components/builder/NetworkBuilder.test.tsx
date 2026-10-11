@@ -5,6 +5,7 @@ import type { Command, CommandResult, SimSnapshot } from '../../../../shared/typ
 import { SimulationEngine } from '../../../../server/src/sim/engine';
 import { listPresets } from '../../../../server/src/sim/presets';
 import { TOPOLOGY_LIMITS } from '../../../../server/src/sim/validateTopology';
+import { API_URL } from '../../lib/config';
 import { NetworkBuilder } from './NetworkBuilder';
 
 // The preset list comes from the real server module (what GET /api/presets serves).
@@ -288,6 +289,11 @@ describe('NetworkBuilder — live state and the demo', () => {
     const snap = new SimulationEngine().snapshot();
     const { topology: _omit, ...legacy } = snap;
     render(<NetworkBuilder snapshot={legacy as SimSnapshot} send={async () => ({ ok: true })} connected />);
-    expect(screen.getByText(/does not support custom topologies yet/)).toBeTruthy();
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toMatch(/Network builder unavailable — the connected backend is an older version/);
+    // Actionable: names the backend in use, this site's origin, and the settings to change.
+    expect(alert.textContent).toContain(API_URL);
+    expect(alert.textContent).toContain(window.location.origin);
+    expect(alert.textContent).toMatch(/VITE_API_URL.*VITE_SOCKET_URL.*FRONTEND_URL/s);
   });
 });

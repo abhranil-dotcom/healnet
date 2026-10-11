@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Command, CommandResult, PresetId, SimSnapshot } from '../../../../shared/types';
 import { usePresets } from '../../hooks/usePresets';
+import { API_URL } from '../../lib/config';
 import { cx } from '../../lib/format';
 import { draftFromSnapshot, draftReducer, onlyFlowDiffers, toSpec, topologyKey, type Draft, type DraftAction } from '../../lib/topologyDraft';
 import { errorCount, hasErrors, validateDraft } from '../../lib/validateDraft';
@@ -143,15 +144,7 @@ export function NetworkBuilder({ snapshot, send, connected }: {
     setSelectedNode(null);
   };
 
-  if (!snapshot.topology) {
-    return (
-      <Panel title="Network builder" subtitle="Presets and custom topologies">
-        <p className="p-4 text-xs text-amber-300/80">
-          The connected simulation server does not support custom topologies yet. Deploy the updated backend to use the builder.
-        </p>
-      </Panel>
-    );
-  }
+  if (!snapshot.topology) return <BackendTooOld />;
 
   const loaded = snapshot.topology;
 
@@ -275,6 +268,38 @@ export function NetworkBuilder({ snapshot, send, connected }: {
           </footer>
         </div>
       )}
+    </Panel>
+  );
+}
+
+/**
+ * Shown instead of the builder when the connected server predates topology support
+ * (its snapshots carry no `topology`). Names the backend and says how to fix it,
+ * so the builder never just looks absent.
+ */
+function BackendTooOld() {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return (
+    <Panel title="Network builder" subtitle="Presets and custom topologies">
+      <div role="alert" className="m-4 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-xs leading-relaxed text-amber-100">
+        <p className="text-sm font-semibold text-amber-200">Network builder unavailable — the connected backend is an older version</p>
+        <p className="mt-1.5 text-amber-100/90">
+          This dashboard is connected to <code className="rounded bg-ink-950 px-1 font-mono text-amber-200">{API_URL}</code>, which does not
+          provide topology presets or custom topologies. The Classic simulation below still works, but presets, the custom editor and the
+          BFS/Dijkstra switch need the backend built from the same branch as this frontend.
+        </p>
+        <ol className="mt-2 list-decimal space-y-0.5 pl-5 text-amber-100/80">
+          <li>Deploy the server from the same Git branch as this frontend (for example a separate Render service).</li>
+          <li>
+            Set <code className="font-mono">VITE_API_URL</code> and <code className="font-mono">VITE_SOCKET_URL</code> for this Vercel
+            environment to that server's URL, then redeploy.
+          </li>
+          <li>
+            Add this site's origin <code className="rounded bg-ink-950 px-1 font-mono text-amber-200">{origin}</code> to{' '}
+            <code className="font-mono">FRONTEND_URL</code> on that server.
+          </li>
+        </ol>
+      </div>
     </Panel>
   );
 }
