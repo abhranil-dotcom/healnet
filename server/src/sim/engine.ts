@@ -338,8 +338,9 @@ export class SimulationEngine {
       // the failure. That is not a recovery: keep waiting if the new route still uses the failed
       // component, otherwise the failure no longer affects the active route.
       const d = this.disruption;
-      const [kind, id] = d.componentId.split(':');
-      const stillAffected = kind === 'node' ? this.routeUsesNode(id) : this.routeUsesLink(id);
+      const sep = d.componentId.indexOf(':');
+      const id = d.componentId.slice(sep + 1);
+      const stillAffected = d.componentId.startsWith('node:') ? this.routeUsesNode(id) : this.routeUsesLink(id);
       if (!stillAffected) {
         this.log('ROUTE_CHANGED', 'info', `${d.cause} failure no longer on the active route (${reason}) before it was detected — not counted as a recovery`);
         this.disruption = null;
