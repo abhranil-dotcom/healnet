@@ -39,10 +39,16 @@ Open **http://localhost:5173**. In development the dashboard connects straight t
 | `PORT` | server | `4000` | Listen port (Render sets it automatically) |
 | `HOST` | server | `0.0.0.0` | Listen address |
 | `FRONTEND_URL` | server | — | Comma-separated frontend origins allowed by CORS / Socket.IO. `http://localhost:5173` and `:4173` are always allowed. `*` wildcards are supported, e.g. `https://healnet-*.vercel.app` |
+| `MAX_SESSIONS` | server | `20` | Maximum simultaneous simulations (one per browser tab). When full, idle sessions are evicted first; otherwise new tabs are refused with a "server busy" message |
+| `SESSION_IDLE_MINUTES` | server | `10` | A simulation with no open tab is deleted after this many minutes |
 
 Templates: `client/.env.example`, `server/.env.example`. Vite embeds `VITE_*` values **at build time**, so changing them requires a rebuild/redeploy. The server reads real environment variables only; it does not load `.env` files.
 
-Server endpoints: `GET /health` (also `/api/health`) → `{"ok": true, ...}`, `GET /api/state` → current snapshot, Socket.IO on `/socket.io`.
+Server endpoints:
+- `GET /health` (also `/api/health`) → `{"ok": true, "sessions": n, "maxSessions": m, ...}`
+- `GET /api/state?session=<id>` → that tab's snapshot. Without `session` it returns the initial state of a new simulation.
+- `GET /api/presets` → the topology presets and validation limits.
+- Socket.IO on `/socket.io`.
 
 ## Deployment (Vercel frontend + Render backend)
 
@@ -97,7 +103,7 @@ Once Vercel gives you the final URL, set `FRONTEND_URL` on Render to exactly tha
 
 ### Production notes
 
-- **One shared simulation.** All visitors see and control the same in-memory network. It resets when the server restarts or redeploys, and the dashboard reconnects and resyncs automatically.
+- **One simulation per browser tab.** Each tab sends a random session id (kept in its `sessionStorage`), so visitors cannot affect each other and a reload returns to the same simulation. Simulations live in memory: they are lost when the server restarts or redeploys (the tab then starts a fresh one), and are limited by `MAX_SESSIONS`.
 - **Render free tier sleeps** after ~15 minutes without traffic. The first visit can take up to a minute: the dashboard pings `/health` to wake it and keeps retrying the socket with backoff.
 - The server uses a single guarded simulation loop. It handles Render's `SIGTERM` by stopping the loop and closing sockets before exiting. Socket.IO messages are compressed (per-message deflate).
 
@@ -154,10 +160,15 @@ shared/types.ts            Types shared by server and client (snapshot + command
 server/src/
   index.ts                 Express + Socket.IO entry point (/health, /api/state), CORS, graceful shutdown
   origins.ts               Allowed-origin parsing for FRONTEND_URL
-  runner.ts                Single real-time loop + throttled snapshot broadcast
+  sessions.ts              Per-tab sessions: limit, idle cleanup, the single real-time loop
+  runner.ts                Drives one session's engine in real time + throttled snapshot broadcast
   sim/
-    topology.ts            Nodes, links, latencies, usable-graph builder
+    topology.ts            Nodes, links, latencies, weighted usable-graph builder
+    validateTopology.ts    Topology validation rules and limits, automatic layout
+    presets.ts             Classic, Ring, Star, Mesh 3×3, BFS-vs-Dijkstra presets
     bfs.ts                 Breadth-First Search
+    dijkstra.ts            Dijkstra (minimum total latency) with deterministic ties
+    routing.ts             Algorithm-neutral computeRoute + explanations
     crc16.ts               CRC-16/CCITT-FALSE
     packet.ts              Packet creation, CRC validation, corruption
     scheduler.ts           Discrete-event queue
@@ -166,6 +177,7 @@ server/src/
 server/tests/              Vitest tests
 client/src/
   lib/config.ts            VITE_API_URL / VITE_SOCKET_URL with localhost defaults
+  lib/session.ts           Per-tab simulation session id
   hooks/useSimulation.ts   Socket.IO connection (reconnect, resync) + command/ack helper
   components/              Header, summary cards, topology (React Flow), controls,
                            health panel, event log, demo progress, analytics (Recharts)

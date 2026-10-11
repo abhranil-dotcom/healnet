@@ -226,6 +226,53 @@ export interface DemoView {
 
 export type SystemStatus = 'OPERATIONAL' | 'DETECTING' | 'DEGRADED' | 'UNAVAILABLE';
 
+/** Display position of a node: top-left corner in dashboard flow coordinates. Ignored by the engine. */
+export interface NodePosition {
+  x: number;
+  y: number;
+}
+
+/** Topology as supplied by a client or a preset. Link ids are derived by the server. */
+export interface TopologySpec {
+  name?: string;
+  /** Positions are optional; missing ones are laid out automatically. */
+  nodes: { id: NodeId; x?: number; y?: number }[];
+  links: { a: NodeId; b: NodeId; latencyMs: number }[];
+  source: NodeId;
+  destination: NodeId;
+}
+
+export type PresetId = 'classic' | 'ring' | 'star' | 'mesh' | 'trap';
+
+export interface PresetInfo {
+  id: PresetId;
+  name: string;
+  description: string;
+  nodeCount: number;
+  linkCount: number;
+  source: NodeId;
+  destination: NodeId;
+}
+
+/** Validation limits applied to every topology (served at GET /api/presets). */
+export interface TopologyLimits {
+  minNodes: number;
+  maxNodes: number;
+  maxLinks: number;
+  minLatencyMs: number;
+  maxLatencyMs: number;
+  maxNameLength: number;
+  maxCoordinate: number;
+  nodeIdPattern: string;
+}
+
+export interface TopologyView {
+  name: string;
+  /** Preset the topology came from, or null for a custom topology. */
+  presetId: PresetId | null;
+  positions: Record<NodeId, NodePosition>;
+}
+
 export interface SimSnapshot {
   simTime: number;
   running: boolean;
@@ -253,6 +300,7 @@ export interface SimSnapshot {
   };
   config: SimConfig;
   demo: DemoView;
+  topology: TopologyView;
 }
 
 /** Commands the client can send to the server (socket event "command"). */
@@ -268,7 +316,11 @@ export type Command =
   | { type: 'reconnectLink'; linkId: LinkId }
   | { type: 'setConfig'; config: Partial<SimConfig> }
   | { type: 'runDemo' }
-  | { type: 'stopDemo' };
+  | { type: 'stopDemo' }
+  // Structural changes: each one resets the simulation.
+  | { type: 'loadPreset'; presetId: PresetId }
+  | { type: 'loadTopology'; topology: TopologySpec }
+  | { type: 'setFlow'; source: NodeId; destination: NodeId };
 
 export interface CommandResult {
   ok: boolean;

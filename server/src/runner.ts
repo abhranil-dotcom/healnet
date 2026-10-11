@@ -1,54 +1,49 @@
 import type { SimSnapshot } from '../../shared/types.js';
 import { SimulationEngine } from './sim/engine.js';
 
-const TICK_MS = 50; // how often simulated time is advanced
 const BROADCAST_MS = 100; // how often clients receive a snapshot
+const MAX_STEP_MS = 250; // cap a single step so a stalled event loop does not jump the simulation forward
 
 /**
- * Owns the single real-time loop that drives the engine. `start()` is
- * idempotent, so the loop can never be duplicated (e.g. on hot reload or
- * repeated calls), and `stop()` clears it.
+ * Drives one simulation engine in real time. It owns no timer: the
+ * SessionManager's single interval calls `tick()` for every active session,
+ * so loops can never be duplicated.
  */
 export class SimulationRunner {
-  readonly engine = new SimulationEngine();
-  private timer: NodeJS.Timeout | null = null;
-  private lastTick = 0;
+  private lastTick: number;
   private lastBroadcast = 0;
   private dirty = true;
 
-  constructor(private readonly broadcast: (snapshot: SimSnapshot) => void) {}
-
-  start(): void {
-    if (this.timer) return;
-    this.lastTick = Date.now();
-    this.timer = setInterval(() => this.tick(), TICK_MS);
+  constructor(
+    private readonly broadcast: (snapshot: SimSnapshot) => void,
+    readonly engine = new SimulationEngine(),
+    now = Date.now(),
+  ) {
+    this.lastTick = now;
   }
 
-  stop(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+  /** Restart the real-time clock (e.g. when a viewer reconnects), so paused wall time is not simulated. */
+  resume(now = Date.now()): void {
+    this.lastTick = now;
   }
 
-  /** Mark state changed (after a command) and push it out immediately. */
-  changed(): void {
-    this.dirty = true;
-    this.flush(true);
-  }
-
-  private tick(): void {
-    const now = Date.now();
-    // Cap a single step so a stalled event loop does not jump the simulation forward.
-    const elapsed = Math.min(now - this.lastTick, 250);
+  tick(now = Date.now()): void {
+    const elapsed = Math.min(Math.max(now - this.lastTick, 0), MAX_STEP_MS);
     this.lastTick = now;
     if (this.engine.running) {
       this.engine.advance(elapsed);
       this.dirty = true;
     }
-    this.flush(false);
+    this.flush(false, now);
   }
 
-  private flush(force: boolean): void {
-    const now = Date.now();
+  /** Mark state changed (after a command) and push it out immediately. */
+  changed(now = Date.now()): void {
+    this.dirty = true;
+    this.flush(true, now);
+  }
+
+  private flush(force: boolean, now: number): void {
     if (!this.dirty || (!force && now - this.lastBroadcast < BROADCAST_MS)) return;
     this.lastBroadcast = now;
     this.dirty = false;

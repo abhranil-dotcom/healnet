@@ -1,4 +1,4 @@
-import type { LinkId, NodeId } from '../../../shared/types.js';
+import type { LinkId, NodeId, NodePosition } from '../../../shared/types.js';
 
 export interface LinkDef {
   id: LinkId;
@@ -10,6 +10,8 @@ export interface LinkDef {
 export interface TopologyDef {
   nodes: NodeId[];
   links: LinkDef[];
+  /** Display positions (dashboard only; the engine ignores them). */
+  positions?: Record<NodeId, NodePosition>;
 }
 
 export function linkId(a: NodeId, b: NodeId): LinkId {

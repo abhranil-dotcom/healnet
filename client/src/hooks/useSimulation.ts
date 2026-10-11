@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { Command, CommandResult, SimSnapshot } from '../../../shared/types';
 import { API_URL, SOCKET_URL } from '../lib/config';
+import { getTabSessionId } from '../lib/session';
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
 
@@ -36,6 +37,8 @@ export function useSimulation() {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 10000,
       timeout: 20000, // generous, so a cold-starting server is not given up on too early
+      // Each tab drives its own simulation on the server; the id survives reloads of this tab.
+      auth: { sessionId: getTabSessionId() },
     });
     socketRef.current = socket;
     socket.on('connect', () => setConnection('connected'));

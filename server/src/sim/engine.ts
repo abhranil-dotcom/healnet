@@ -10,10 +10,12 @@ import type {
   MetricSample,
   Metrics,
   NodeId,
+  NodePosition,
   NodeStatus,
   Packet,
   PacketRecord,
   PacketType,
+  PresetId,
   RecoveryRecord,
   RouteTrace,
   SimConfig,
@@ -24,9 +26,11 @@ import type {
 import { formatCrc } from './crc16.js';
 import { DemoRunner } from './demo.js';
 import { corruptPacket, createPacket, validatePacket } from './packet.js';
+import { isPresetId, loadPresetTopology, presetSpec } from './presets.js';
 import { ALGORITHM_LABEL, computeRoute, isRoutingAlgorithm } from './routing.js';
 import { Scheduler } from './scheduler.js';
-import { buildGraph, defaultTopology, linkId, pathCost, type LinkDef, type TopologyDef } from './topology.js';
+import { buildGraph, linkId, pathCost, type LinkDef, type TopologyDef } from './topology.js';
+import { autoLayout, validateTopology } from './validateTopology.js';
 
 export const DEFAULT_CONFIG: SimConfig = {
   routingAlgorithm: 'BFS',
@@ -96,9 +100,13 @@ const sameRoute = (a: NodeId[] | null, b: NodeId[] | null) =>
  * interval, and the tests call it directly.
  */
 export class SimulationEngine {
-  readonly topo: TopologyDef;
-  readonly flow = { source: 'A', destination: 'C' };
-  readonly primaryRoute: NodeId[] = ['A', 'B', 'C'];
+  topo!: TopologyDef;
+  flow!: { source: NodeId; destination: NodeId };
+  topologyName = '';
+  presetId: PresetId | null = null;
+  positions: Record<NodeId, NodePosition> = {};
+  /** Route the configured algorithm chooses on the intact network. */
+  primaryRoute: NodeId[] = [];
   config: SimConfig;
 
   now = 0;
@@ -125,10 +133,31 @@ export class SimulationEngine {
   private nextEventId = 1;
   private demoConfigBackup: SimConfig | null = null;
 
-  constructor(config: Partial<SimConfig> = {}, topo: TopologyDef = defaultTopology()) {
-    this.topo = topo;
+  /** Without a topology the engine starts on the Classic HEALNET preset (flow A → C). */
+  constructor(config: Partial<SimConfig> = {}, topo?: TopologyDef, flow: { source: NodeId; destination: NodeId } = { source: 'A', destination: 'C' }) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    if (topo) this.install(topo, flow, 'Custom topology', null);
+    else this.installPreset('classic');
     this.reset();
+  }
+
+  /** Swap in a (validated) topology. The caller resets the simulation afterwards. */
+  private install(topo: TopologyDef, flow: { source: NodeId; destination: NodeId }, name: string, presetId: PresetId | null): void {
+    this.topo = topo;
+    this.flow = { ...flow };
+    this.topologyName = name;
+    this.presetId = presetId;
+    this.positions = { ...autoLayout(topo.nodes), ...topo.positions };
+  }
+
+  private installPreset(id: PresetId): void {
+    const p = loadPresetTopology(id);
+    this.install(p.topo, p.flow, p.name, id);
+  }
+
+  private updatePrimaryRoute(): void {
+    const r = computeRoute(this.config.routingAlgorithm, buildGraph(this.topo), this.flow.source, this.flow.destination);
+    this.primaryRoute = r.path ?? [];
   }
 
   // ───────────────────────────── lifecycle ─────────────────────────────
@@ -164,6 +193,7 @@ export class SimulationEngine {
     }
 
     this.log('INIT', 'info', `Network initialized: ${this.topo.nodes.length} nodes, ${this.topo.links.length} links`);
+    this.updatePrimaryRoute();
     this.recomputeRoute(INITIAL_DISCOVERY);
 
     this.scheduler.schedule(this.config.heartbeatIntervalMs, () => this.heartbeatRound());
@@ -617,18 +647,57 @@ export class SimulationEngine {
     this.log('USER', 'info', `Configuration: heartbeat ${next.heartbeatIntervalMs} ms, threshold ${next.missedThreshold}, traffic ${next.trafficIntervalMs ? next.trafficIntervalMs + ' ms' : 'off'}`);
     if (algorithmChanged) {
       this.log('USER', 'info', `Routing algorithm set to ${ALGORITHM_LABEL[next.routingAlgorithm]}`);
+      this.updatePrimaryRoute();
       this.recomputeRoute('routing algorithm changed');
     }
     return { ok: true };
   }
 
+  // ───────────────────────────── topology (structural changes reset the simulation) ─────────────────────────────
+
+  loadTopology(spec: unknown, presetId: PresetId | null = null): CommandResult {
+    if (this.demo?.running) return { ok: false, error: 'Stop the demo before changing the topology' };
+    const v = validateTopology(spec);
+    if (!v.ok) return v;
+    this.install(v.topo, v.flow, v.name, presetId);
+    this.reset();
+    this.log('USER', 'info', `Topology loaded: ${v.name} — ${v.topo.nodes.length} nodes, ${v.topo.links.length} links, flow ${v.flow.source} → ${v.flow.destination} (simulation reset)`);
+    return { ok: true };
+  }
+
+  loadPreset(id: unknown): CommandResult {
+    if (!isPresetId(id)) return { ok: false, error: `Unknown preset ${JSON.stringify(id)}` };
+    if (this.demo?.running) return { ok: false, error: 'Stop the demo before changing the topology' };
+    return this.loadTopology(presetSpec(id), id);
+  }
+
+  setFlow(source: unknown, destination: unknown): CommandResult {
+    if (this.demo?.running) return { ok: false, error: 'Stop the demo before changing the flow' };
+    if (typeof source !== 'string' || !this.nodes.has(source)) return { ok: false, error: `Source node ${JSON.stringify(source)} does not exist` };
+    if (typeof destination !== 'string' || !this.nodes.has(destination)) return { ok: false, error: `Destination node ${JSON.stringify(destination)} does not exist` };
+    if (source === destination) return { ok: false, error: 'Source and destination must be different nodes' };
+    if (source === this.flow.source && destination === this.flow.destination) return { ok: true };
+    this.flow = { source, destination };
+    this.reset();
+    this.log('USER', 'info', `Flow set to ${source} → ${destination} (simulation reset)`);
+    return { ok: true };
+  }
+
+  private isClassicLoaded(): boolean {
+    return this.presetId === 'classic' && this.flow.source === 'A' && this.flow.destination === 'C';
+  }
+
   runDemo(): void {
     const userConfig = this.demoConfigBackup ?? this.config;
+    // The demo script is written for the Classic network (A-B-C / A-D-C, Node B).
+    const switchedTopology = !this.isClassicLoaded();
+    if (switchedTopology) this.installPreset('classic');
     // The Classic demo always uses BFS. Set it before reset() so the initial route is BFS too;
     // traffic timing is switched after reset() exactly as before, keeping results identical.
     this.demoConfigBackup = null;
     this.config = { ...userConfig, routingAlgorithm: 'BFS' };
     this.reset();
+    if (switchedTopology) this.log('DEMO', 'info', 'Classic HEALNET preset loaded for the demo');
     this.demoConfigBackup = userConfig;
     // Demo traffic: one DATA packet every 500 ms so the loss window is visible.
     this.config = { ...userConfig, trafficIntervalMs: 500, routingAlgorithm: 'BFS' };
@@ -644,7 +713,10 @@ export class SimulationEngine {
     if (this.demoConfigBackup) this.config = this.demoConfigBackup;
     this.demoConfigBackup = null;
     this.log('DEMO', 'info', message);
-    if (this.config.routingAlgorithm !== demoAlgorithm) this.recomputeRoute('routing algorithm restored after demo');
+    if (this.config.routingAlgorithm !== demoAlgorithm) {
+      this.updatePrimaryRoute();
+      this.recomputeRoute('routing algorithm restored after demo');
+    }
     if (pause) this.pause();
   }
 
@@ -674,6 +746,9 @@ export class SimulationEngine {
         if (!this.demo?.running) return { ok: false, error: 'No demo is running' };
         this.demo.stop(this);
         return { ok: true };
+      case 'loadPreset': return this.loadPreset(cmd.presetId);
+      case 'loadTopology': return this.loadTopology(cmd.topology);
+      case 'setFlow': return this.setFlow(cmd.source, cmd.destination);
       default:
         return { ok: false, error: 'Unknown command' };
     }
@@ -712,6 +787,11 @@ export class SimulationEngine {
       },
       config: { ...this.config },
       demo: this.demo?.view() ?? { running: false, finished: false, steps: [], summary: null },
+      topology: {
+        name: this.topologyName,
+        presetId: this.presetId,
+        positions: Object.fromEntries(this.topo.nodes.map((n) => [n, { ...this.positions[n] }])),
+      },
     };
   }
 }
