@@ -88,7 +88,13 @@ function ConfigForm({ config, disabled, send }: { config: SimConfig; disabled: b
       {field('missedThreshold', 'Miss threshold', 1, 10, 1, '×')}
       {field('trafficIntervalMs', 'Auto traffic (0 = off)', 0, 10000, 100, 'ms')}
       <div className="flex gap-2 pt-1">
-        <Button size="sm" variant="primary" disabled={disabled || !changed} onClick={() => send({ type: 'setConfig', config: draft })}>
+        <Button size="sm" variant="primary" disabled={disabled || !changed} onClick={() =>
+            send({
+              type: 'setConfig',
+              // Only the fields this form edits, so it never overwrites the routing algorithm.
+              config: { heartbeatIntervalMs: draft.heartbeatIntervalMs, missedThreshold: draft.missedThreshold, trafficIntervalMs: draft.trafficIntervalMs },
+            })
+          }>
           Apply
         </Button>
         <Button size="sm" variant="ghost" disabled={disabled || !changed} onClick={() => setDraft(config)}>
@@ -105,7 +111,7 @@ function ConfigForm({ config, disabled, send }: { config: SimConfig; disabled: b
 
 function Group({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="scroll-thin flex max-h-72 flex-col gap-2 overflow-y-auto pr-1">
       <h3 className="text-[11px] font-semibold tracking-[0.1em] text-slate-500 uppercase">{label}</h3>
       {children}
     </div>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Command } from '../../shared/types';
 import { Analytics } from './components/Analytics';
+import { NetworkBuilder } from './components/builder/NetworkBuilder';
 import { ControlPanel } from './components/ControlPanel';
 import { DemoPanel } from './components/DemoPanel';
 import { EventFeed } from './components/EventFeed';
@@ -82,7 +83,14 @@ export default function App() {
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
             <div className="min-w-0 space-y-4">
-              <Topology snapshot={snapshot} clockRef={clockRef} onToggleNode={toggleNode} onToggleLink={toggleLink} />
+              <Topology
+                snapshot={snapshot}
+                clockRef={clockRef}
+                onToggleNode={toggleNode}
+                onToggleLink={toggleLink}
+                onAlgorithmChange={(routingAlgorithm) => run({ type: 'setConfig', config: { routingAlgorithm } })}
+              />
+              <NetworkBuilder snapshot={snapshot} send={send} connected={connection === 'connected'} />
               <ControlPanel snapshot={snapshot} send={run} />
               <Analytics snapshot={snapshot} />
             </div>
@@ -94,7 +102,7 @@ export default function App() {
           </div>
 
           <footer className="pb-2 text-center text-[11px] text-slate-600">
-            HEALNET · software-only simulation · heartbeat failure detection · BFS route recovery · CRC-16/CCITT-FALSE
+            HEALNET · software-only simulation · heartbeat failure detection · BFS / Dijkstra route recovery · CRC-16/CCITT-FALSE
           </footer>
         </main>
       )}

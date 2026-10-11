@@ -1,16 +1,20 @@
 import { ViewportPortal } from '@xyflow/react';
 import { useEffect, useState, type RefObject } from 'react';
-import type { InFlightPacket } from '../../../../shared/types';
+import type { InFlightPacket, NodeId, NodePosition } from '../../../../shared/types';
 import { estimateSimTime, type SimClockRef } from '../../hooks/useSimulation';
 import { cx } from '../../lib/format';
-import { nodeCenter } from './layout';
+import { hopProgress, nodeCenter } from './layout';
 
 /**
  * Draws packets that are actually in flight in the engine. Each packet's
  * position is derived from its real hop departure/arrival times and the
  * interpolated simulation clock — it is never a decorative animation.
  */
-export function PacketLayer({ packets, clockRef }: { packets: InFlightPacket[]; clockRef: RefObject<SimClockRef> }) {
+export function PacketLayer({ packets, clockRef, positions }: {
+  packets: InFlightPacket[];
+  clockRef: RefObject<SimClockRef>;
+  positions: Record<NodeId, NodePosition>;
+}) {
   const [, setFrame] = useState(0);
 
   useEffect(() => {
@@ -29,9 +33,9 @@ export function PacketLayer({ packets, clockRef }: { packets: InFlightPacket[]; 
   return (
     <ViewportPortal>
       {packets.map((p) => {
-        const a = nodeCenter(p.from);
-        const b = nodeCenter(p.to);
-        const t = Math.min(1, Math.max(0, (now - p.departAt) / (p.arriveAt - p.departAt)));
+        const a = nodeCenter(positions, p.from);
+        const b = nodeCenter(positions, p.to);
+        const t = hopProgress(now, p.departAt, p.arriveAt);
         const x = a.x + (b.x - a.x) * t;
         const y = a.y + (b.y - a.y) * t;
         return (

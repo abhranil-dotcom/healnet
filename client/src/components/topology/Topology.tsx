@@ -1,10 +1,12 @@
 import { ReactFlow, Background, BackgroundVariant } from '@xyflow/react';
 import { useMemo, type ReactNode, type RefObject } from 'react';
-import type { SimSnapshot } from '../../../../shared/types';
+import type { RoutingAlgorithm, SimSnapshot } from '../../../../shared/types';
 import type { SimClockRef } from '../../hooks/useSimulation';
 import { fmtRoute, routeLinks } from '../../lib/format';
 import { Panel } from '../ui';
-import { NODE_POSITIONS } from './layout';
+import { AlgorithmToggle } from './AlgorithmToggle';
+import { FitOnResize } from './FitOnResize';
+import { snapshotPositions } from './layout';
 import { LinkEdge, type LinkEdgeType } from './LinkEdge';
 import { NetworkNode, type NetworkNodeType } from './NetworkNode';
 import { PacketLayer } from './PacketLayer';
@@ -13,20 +15,24 @@ import { PacketLayer } from './PacketLayer';
 const nodeTypes = { network: NetworkNode };
 const edgeTypes = { link: LinkEdge };
 
-export function Topology({ snapshot, clockRef, onToggleNode, onToggleLink }: {
+export function Topology({ snapshot, clockRef, onToggleNode, onToggleLink, onAlgorithmChange }: {
   snapshot: SimSnapshot;
   clockRef: RefObject<SimClockRef>;
   onToggleNode: (id: string) => void;
   onToggleLink: (id: string) => void;
+  onAlgorithmChange: (algorithm: RoutingAlgorithm) => void;
 }) {
   const { nodes: simNodes, links, activeRoute, flow, config } = snapshot;
+  const positions = useMemo(() => snapshotPositions(snapshot), [snapshot.nodes, snapshot.topology]);
+  // Re-mount React Flow when the network itself changes, so the view fits the new topology.
+  const layoutKey = useMemo(() => JSON.stringify(positions), [positions]);
 
   const nodes = useMemo<NetworkNodeType[]>(
     () =>
       simNodes.map((n) => ({
         id: n.id,
         type: 'network',
-        position: NODE_POSITIONS[n.id],
+        position: positions[n.id],
         draggable: false,
         data: {
           node: n,
@@ -35,7 +41,7 @@ export function Topology({ snapshot, clockRef, onToggleNode, onToggleLink }: {
           threshold: config.missedThreshold,
         },
       })),
-    [simNodes, activeRoute, flow, config.missedThreshold],
+    [simNodes, positions, activeRoute, flow, config.missedThreshold],
   );
 
   const edges = useMemo<LinkEdgeType[]>(() => {
@@ -45,15 +51,31 @@ export function Topology({ snapshot, clockRef, onToggleNode, onToggleLink }: {
 
   const routeLabel = activeRoute ? fmtRoute(activeRoute) : 'COMMUNICATION UNAVAILABLE';
   const isPrimary = activeRoute?.join() === snapshot.primaryRoute.join();
+  const routeCost = snapshot.routing?.activeRouteCost;
+  const topo = snapshot.topology;
 
   return (
     <Panel
       title="Network topology"
-      subtitle="Click a node or link to inject / clear a fault"
+      subtitle={
+        <>
+          {topo && (
+            <span className="text-slate-400">
+              {topo.name}
+              <span className="text-slate-600"> · {topo.presetId ? 'preset' : 'custom'} · </span>
+            </span>
+          )}
+          Click a node or link to inject / clear a fault
+        </>
+      }
       actions={
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
+          {snapshot.routing && (
+            <AlgorithmToggle value={snapshot.routing.algorithm} disabled={snapshot.demo.running} onChange={onAlgorithmChange} />
+          )}
           <span className="text-slate-500">Active route</span>
           <span
+            data-testid="active-route"
             className={
               activeRoute
                 ? 'rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 font-mono text-cyan-200'
@@ -62,12 +84,14 @@ export function Topology({ snapshot, clockRef, onToggleNode, onToggleLink }: {
           >
             {routeLabel}
           </span>
+          {activeRoute && routeCost != null && <span className="font-mono text-slate-400" data-testid="route-cost">{routeCost} ms</span>}
           {activeRoute && <span className="text-slate-500">{isPrimary ? 'primary' : 'backup'}</span>}
         </div>
       }
     >
       <div className="relative h-[420px]">
         <ReactFlow
+          key={layoutKey}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -86,7 +110,8 @@ export function Topology({ snapshot, clockRef, onToggleNode, onToggleLink }: {
           onEdgeClick={(_, e) => onToggleLink(e.id)}
         >
           <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#1f2a38" />
-          <PacketLayer packets={snapshot.inFlight} clockRef={clockRef} />
+          <PacketLayer packets={snapshot.inFlight} clockRef={clockRef} positions={positions} />
+          <FitOnResize padding={0.18} />
         </ReactFlow>
 
         <Legend />

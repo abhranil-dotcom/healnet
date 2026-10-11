@@ -60,7 +60,10 @@ export function Analytics({ snapshot }: { snapshot: SimSnapshot }) {
         <Chart
           title="End-to-end delay per packet"
           empty={delaySamples.length === 0}
-          legend={[{ color: SERIES_1, label: 'Primary A→B→C' }, { color: SERIES_2, label: 'Backup / other route' }]}
+          legend={[
+            { color: SERIES_1, label: `Primary ${snapshot.primaryRoute.join('→') || '—'}` },
+            { color: SERIES_2, label: 'Backup / other route' },
+          ]}
         >
           <BarChart data={delaySamples} margin={{ top: 8, right: 8, bottom: 0, left: -18 }} barCategoryGap={2}>
             <CartesianGrid stroke={GRID} vertical={false} />
@@ -93,7 +96,7 @@ export function Analytics({ snapshot }: { snapshot: SimSnapshot }) {
                     <th className="pb-1.5 font-medium">Failed at</th>
                     <th className="pb-1.5 font-medium">Detection</th>
                     <th className="pb-1.5 font-medium">Recovery</th>
-                    <th className="pb-1.5 font-medium">BFS (real)</th>
+                    <th className="pb-1.5 font-medium">Routing (real)</th>
                     <th className="pb-1.5 font-medium">Route change</th>
                   </tr>
                 </thead>
@@ -104,7 +107,7 @@ export function Analytics({ snapshot }: { snapshot: SimSnapshot }) {
                       <td>{(r.failedAt / 1000).toFixed(2)} s</td>
                       <td>{fmtMs(r.detectionMs)}</td>
                       <td className="text-emerald-300">{fmtMs(r.recoveryMs)}</td>
-                      <td>{r.bfsMicros} µs</td>
+                      <td>{r.algorithm === 'DIJKSTRA' ? 'Dijkstra' : 'BFS'} {r.computeMicros ?? r.bfsMicros} µs</td>
                       <td>{fmtRoute(r.oldRoute)} ⇒ {fmtRoute(r.newRoute)}</td>
                     </tr>
                   ))}

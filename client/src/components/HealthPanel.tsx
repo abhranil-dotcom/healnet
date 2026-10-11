@@ -4,6 +4,8 @@ import { Badge, linkStatusStyle, nodeStatusStyle, Panel } from './ui';
 
 export function HealthPanel({ snapshot }: { snapshot: SimSnapshot }) {
   const { nodes, links, config, lastBfs } = snapshot;
+  const last = snapshot.routing?.lastResult;
+  const algorithm = last?.algorithm === 'DIJKSTRA' ? 'Dijkstra' : 'BFS';
 
   return (
     <Panel title="Network health" subtitle={`Heartbeat every ${config.heartbeatIntervalMs} ms · fail after ${config.missedThreshold} misses`}>
@@ -52,17 +54,23 @@ export function HealthPanel({ snapshot }: { snapshot: SimSnapshot }) {
 
         <div className="rounded-lg border border-ink-700/70 bg-ink-950/60 p-3">
           <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
-            Last BFS run
+            Last {algorithm} run
             {lastBfs && <span className="font-mono font-normal normal-case">t = {fmtSimTime(lastBfs.at)}</span>}
           </div>
           {lastBfs ? (
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-xs">
               <dt className="text-slate-500">excluded</dt>
               <dd className="text-rose-300">{[...lastBfs.excludedNodes, ...lastBfs.excludedLinks].join(', ') || 'none'}</dd>
-              <dt className="text-slate-500">visited</dt>
+              <dt className="text-slate-500">{algorithm === 'Dijkstra' ? 'settled' : 'visited'}</dt>
               <dd className="text-slate-300">{lastBfs.visitOrder.join(' → ') || '—'}</dd>
               <dt className="text-slate-500">path</dt>
               <dd className={lastBfs.path ? 'text-cyan-300' : 'text-rose-300'}>{lastBfs.path?.join(' → ') ?? 'unreachable'}</dd>
+              {last?.path && last.cost != null && (
+                <>
+                  <dt className="text-slate-500">cost</dt>
+                  <dd className="text-slate-300">{last.cost} ms · {last.hops} hop(s)</dd>
+                </>
+              )}
             </dl>
           ) : (
             <p className="text-xs text-slate-500">Not run yet.</p>

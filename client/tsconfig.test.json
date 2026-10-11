@@ -1,0 +1,9 @@
+{
+  // Type-checks the tests, which import the real server engine (Node APIs) to produce genuine snapshots.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "../shared", "vitest.config.ts"],
+  "exclude": []
+}

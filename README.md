@@ -26,7 +26,7 @@ Open **http://localhost:5173**. In development the dashboard connects straight t
 | Command (repo root) | What it does |
 |---|---|
 | `npm run dev` | Server (`tsx watch`) + Vite dev server, side by side |
-| `npm test` | Vitest suite: BFS, unreachable destinations, failure detection, recovery, CRC, demo, CORS origins |
+| `npm test` | Vitest suites. Server: BFS/Dijkstra, failure detection, recovery, CRC, demo baseline, topology validation, presets, sessions, CORS. Client: network builder (presets, draft editing, validation, apply/discard), layout, algorithm switch |
 | `npm run typecheck` | TypeScript checks for server and client |
 | `npm run build` then `npm start` | Single-server mode: the Express server also serves the built dashboard at **http://localhost:4000** |
 
@@ -174,13 +174,30 @@ server/src/
     scheduler.ts           Discrete-event queue
     engine.ts              Heartbeats, detection, routing, forwarding, metrics, events
     demo.ts                Step-based one-click demo
-server/tests/              Vitest tests
+server/tests/              Vitest tests (server)
 client/src/
   lib/config.ts            VITE_API_URL / VITE_SOCKET_URL with localhost defaults
   lib/session.ts           Per-tab simulation session id
+  lib/topologyDraft.ts     Builder draft model (add/remove/rename nodes, links, latency, flow)
+  lib/validateDraft.ts     Field-level validation mirroring the server rules
   hooks/useSimulation.ts   Socket.IO connection (reconnect, resync) + command/ack helper
+  hooks/usePresets.ts      GET /api/presets (preset list + validation limits)
   components/              Header, summary cards, topology (React Flow), controls,
                            health panel, event log, demo progress, analytics (Recharts)
+  components/builder/      Network builder: preset picker, draft canvas, draft editor
 ```
+
+### Network builder
+
+Below the live topology, the **Network builder** panel has two tabs:
+
+- **Presets**: load Classic, Ring, Star, Mesh 3×3 or BFS vs Dijkstra (`loadPreset`; resets the simulation).
+- **Custom editor**: edit a local draft. Add or remove nodes, rename them, and drag them. Click two nodes to link them, or click a link to edit its latency. Choose the source and destination.
+  - Problems are shown beside the field.
+  - Nothing reaches the simulation until **Apply topology**, which sends `loadTopology` (or `setFlow` when only the flow changed) and resets the simulation.
+  - **Discard draft** throws the edits away.
+  - Loading a preset while the draft has unsaved changes asks for confirmation first.
+
+The BFS / Dijkstra switch in the topology header changes the routing algorithm live. The guided demo always runs on Classic with BFS.
 
 Communication: the server emits `state` snapshots (~10/s). The client sends `command` events (`failNode`, `sendPackets`, `runDemo`, …) and receives an `{ ok, error }` acknowledgement. Invalid operations, such as failing an already-failed node, return an error that the dashboard shows as a toast.
