@@ -98,6 +98,21 @@ describe('engine routing integration', () => {
     expect(e.events.find((ev) => ev.kind === 'RECOVERY')?.message).toContain('Dijkstra');
   });
 
+  it('an algorithm switch that avoids an undetected failure is not recorded as a recovery', () => {
+    const e = new SimulationEngine(quiet, trapTopology());
+    e.start();
+    e.advance(500);
+    e.failNode('B'); // on the BFS route A-B-C, not yet detected
+    e.setConfig({ routingAlgorithm: 'DIJKSTRA' });
+    expect(e.activeRoute).toEqual(['A', 'D', 'E', 'C']);
+    expect(e.recoveries).toHaveLength(0);
+    expect(e.events.some((ev) => ev.message.includes('not counted as a recovery'))).toBe(true);
+    e.advance(5000); // heartbeats now detect B; the route does not need to change
+    expect(e.nodes.get('B')!.status).toBe('FAILED');
+    expect(e.activeRoute).toEqual(['A', 'D', 'E', 'C']);
+    expect(e.recoveries).toHaveLength(0);
+  });
+
   it('rejects an unknown routing algorithm', () => {
     const e = new SimulationEngine(quiet);
     expect(e.setConfig({ routingAlgorithm: 'A_STAR' as never }).ok).toBe(false);
