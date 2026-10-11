@@ -101,6 +101,20 @@ No trailing slash is needed. After changing these, **redeploy**: they are baked 
 
 Once Vercel gives you the final URL, set `FRONTEND_URL` on Render to exactly that origin (scheme + host, no path) and let Render redeploy. If the dashboard stays on "Connecting…", the browser console usually shows a CORS error naming the origin that needs to be added.
 
+### Feature-branch previews (optional)
+
+Vercel builds a preview for every pushed branch, but the production Render service only deploys `main`. To give `feature/resilience-lab` previews a backend running the same code, set up the following once. Production is not affected.
+
+1. **Render:** go to New → **Blueprint**, then pick this repo and the branch `feature/resilience-lab`. `render.yaml` creates `healnet-backend-lab`.
+   - It deploys that branch on every push.
+   - It allows the project's Vercel preview origins through `FRONTEND_URL`.
+2. **Vercel:** go to Settings → Environment Variables.
+   - Add `VITE_API_URL` and `VITE_SOCKET_URL`, set to the new service's URL.
+   - Scope them to **Preview** and the branch **`feature/resilience-lab`** only.
+   - Redeploy the latest preview once.
+
+After that, each push to the branch redeploys both the preview frontend and its matching backend.
+
 ### Production notes
 
 - **One simulation per browser tab.** Each tab sends a random session id (kept in its `sessionStorage`), so visitors cannot affect each other and a reload returns to the same simulation. Simulations live in memory: they are lost when the server restarts or redeploys (the tab then starts a fresh one), and are limited by `MAX_SESSIONS`.

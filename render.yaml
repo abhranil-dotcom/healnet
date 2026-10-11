@@ -1,0 +1,27 @@
+# Render Blueprint for the FEATURE-BRANCH backend only.
+#
+# It defines one extra web service that deploys `feature/resilience-lab` on every push,
+# so Vercel preview builds of that branch have a backend running the same code.
+#
+# The production backend is NOT defined here on purpose: it was created in the Render
+# dashboard, tracks `main`, and must stay untouched. Do not add it to this file unless
+# you intend Render to manage it through this Blueprint.
+#
+# One-time setup: Render → New → Blueprint → repo abhranil-dotcom/healnet, branch
+# feature/resilience-lab. Then, in Vercel, set VITE_API_URL and VITE_SOCKET_URL for
+# Preview + branch feature/resilience-lab to this service's URL and redeploy once.
+services:
+  - type: web
+    name: healnet-backend-lab
+    runtime: node
+    plan: free
+    branch: feature/resilience-lab
+    rootDir: server
+    # npm finds the workspace root and installs from the root package-lock.json.
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      # Vercel preview URLs for this project (per-commit and branch URLs). `*` matches [a-z0-9-].
+      - key: FRONTEND_URL
+        value: https://healnet-*-abhranilc07-gmailcoms-projects.vercel.app
